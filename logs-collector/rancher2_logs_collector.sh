@@ -1189,6 +1189,133 @@ kubeadm-etcd() {
 
 }
 
+longhorn-collect() {
+
+  # Skip if API server offline
+  if [ "$API_SERVER_OFFLINE" ]; then
+    techo "[!] Kube-apiserver offline, skipping Longhorn collection"
+    return
+  fi
+
+  # Use existing ctlcmd or build one with fallback kubeconfig
+  local LH_CTLCMD="${ctlcmd}"
+  if [ -z "$LH_CTLCMD" ]; then
+    if [ -f "${HOME}/.kube/config" ]; then
+      LH_CTLCMD="kubectl --kubeconfig=${HOME}/.kube/config"
+    elif [ -f "/root/.kube/config" ]; then
+      LH_CTLCMD="kubectl --kubeconfig=/root/.kube/config"
+    else
+      techo "[!] No kubeconfig found, skipping Longhorn collection"
+      return
+    fi
+  fi
+
+  # Check if Longhorn namespace exists
+  if ! ${LH_CTLCMD} get namespace longhorn-system >/dev/null 2>&1; then
+    techo "[!] Longhorn not detected, skipping collection"
+    return
+  fi
+
+  techo "Collecting Longhorn storage info"
+  mkdir -p "${TMPDIR}/longhorn/kubectl"
+
+  # Longhorn Custom Resources
+  LONGHORN_CRDS=(
+    volumes.longhorn.io
+    engines.longhorn.io
+    replicas.longhorn.io
+    nodes.longhorn.io
+    settings.longhorn.io
+    engineimages.longhorn.io
+    instancemanagers.longhorn.io
+    sharemanagers.longhorn.io
+    backingimages.longhorn.io
+    backuptargets.longhorn.io
+    backupvolumes.longhorn.io
+    backups.longhorn.io
+    recurringjobs.longhorn.io
+    orphans.longhorn.io
+    snapshots.longhorn.io
+    supportbundles.longhorn.io
+    systembackups.longhorn.io
+    systemrestores.longhorn.io
+  )
+
+  for CRD in "${LONGHORN_CRDS[@]}"; do
+    ${LH_CTLCMD} get "$CRD" -A -o yaml > "${TMPDIR}/longhorn/kubectl/${CRD}" 2>&1
+  done
+
+  # Settings in readable format
+  ${LH_CTLCMD} get settings.longhorn.io -n longhorn-system -o wide > "${TMPDIR}/longhorn/kubectl/settings-wide" 2>&1
+
+  # Namespace resources
+  mkdir -p "${TMPDIR}/longhorn/kubectl/namespace"
+  ${LH_CTLCMD} get deployments -n longhorn-system -o wide > "${TMPDIR}/longhorn/kubectl/namespace/deployments" 2>&1
+  ${LH_CTLCMD} get daemonsets -n longhorn-system -o wide > "${TMPDIR}/longhorn/kubectl/namespace/daemonsets" 2>&1
+  ${LH_CTLCMD} get pods -n longhorn-system -o wide > "${TMPDIR}/longhorn/kubectl/namespace/pods" 2>&1
+  ${LH_CTLCMD} get svc -n longhorn-system -o wide > "${TMPDIR}/longhorn/kubectl/namespace/services" 2>&1
+  ${LH_CTLCMD} get events -n longhorn-system --sort-by='.lastTimestamp' > "${TMPDIR}/longhorn/kubectl/namespace/events" 2>&1
+  ${LH_CTLCMD} get configmaps -n longhorn-system > "${TMPDIR}/longhorn/kubectl/namespace/configmaps" 2>&1
+  ${LH_CTLCMD} get secrets -n longhorn-system > "${TMPDIR}/longhorn/kubectl/namespace/secrets" 2>&1
+
+  # Storage resources
+  mkdir -p "${TMPDIR}/longhorn/kubectl/storage"
+  ${LH_CTLCMD} get storageclass -o yaml > "${TMPDIR}/longhorn/kubectl/storage/storageclasses" 2>&1
+  ${LH_CTLCMD} get pv -o wide > "${TMPDIR}/longhorn/kubectl/storage/pv" 2>&1
+  ${LH_CTLCMD} get pvc -A -o wide > "${TMPDIR}/longhorn/kubectl/storage/pvc" 2>&1
+  ${LH_CTLCMD} get volumeattachments -o wide > "${TMPDIR}/longhorn/kubectl/storage/volumeattachments" 2>&1
+
+  # Pod descriptions for troubleshooting
+  mkdir -p "${TMPDIR}/longhorn/poddescribe"
+  for POD in $(${LH_CTLCMD} -n longhorn-system get pods --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do
+    ${LH_CTLCMD} -n longhorn-system describe pod "$POD" > "${TMPDIR}/longhorn/poddescribe/${POD}" 2>&1
+  done
+
+  # Node-level collection
+  techo "Collecting Longhorn node-level info"
+  mkdir -p "${TMPDIR}/longhorn/node"
+
+  # Longhorn data directory
+  if [ -d /var/lib/longhorn ]; then
+    ls -lahR /var/lib/longhorn > "${TMPDIR}/longhorn/node/var-lib-longhorn-listing" 2>&1
+    du -sh /var/lib/longhorn/* > "${TMPDIR}/longhorn/node/var-lib-longhorn-sizes" 2>&1
+    df -h /var/lib/longhorn > "${TMPDIR}/longhorn/node/var-lib-longhorn-df" 2>&1
+  fi
+
+  # Block devices
+  if command -v lsblk >/dev/null 2>&1; then
+    lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE > "${TMPDIR}/longhorn/node/lsblk" 2>&1
+  fi
+
+  # iSCSI (Longhorn uses iSCSI)
+  if command -v iscsiadm >/dev/null 2>&1; then
+    iscsiadm -m session > "${TMPDIR}/longhorn/node/iscsi-sessions" 2>&1
+    iscsiadm -m node > "${TMPDIR}/longhorn/node/iscsi-nodes" 2>&1
+  fi
+
+  # Mounts related to Longhorn/CSI
+  mount | grep -E "longhorn|/var/lib/kubelet/plugins" > "${TMPDIR}/longhorn/node/mounts-longhorn" 2>&1
+
+  # Kernel modules for iSCSI
+  lsmod | grep -E "iscsi|scsi" > "${TMPDIR}/longhorn/node/lsmod-iscsi" 2>&1
+
+  # Longhorn processes
+  ps aux | grep -E "[l]onghorn|[t]gt" > "${TMPDIR}/longhorn/node/processes" 2>&1
+
+  # CSI socket
+  if [ -d /var/lib/kubelet/plugins/driver.longhorn.io ]; then
+    ls -la /var/lib/kubelet/plugins/driver.longhorn.io/ > "${TMPDIR}/longhorn/node/csi-driver" 2>&1
+  fi
+
+  # Longhorn CLI (if available)
+  if command -v longhornctl >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/longhorn/cli"
+    longhornctl version > "${TMPDIR}/longhorn/cli/version" 2>&1
+    longhornctl check preflight > "${TMPDIR}/longhorn/cli/preflight" 2>&1
+  fi
+
+}
+
 timeout_cmd() {
 
   WPID=$!
@@ -1573,6 +1700,9 @@ elif [ "$DISTRO" = "kubeadm" ]; then
     kubeadm-certs
     kubeadm-etcd
 fi
+
+# Longhorn storage collection (runs regardless of distribution if installed)
+longhorn-collect
 
 var-log
 

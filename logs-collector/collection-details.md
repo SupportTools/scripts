@@ -31,6 +31,16 @@ Output that is collected only from the node where the logs collector script is r
 - **Calico** (if calicoctl available): node status, nodes, IP pools, BGP configuration
 - **Cilium** (if cilium CLI available): status, BPF endpoint list, BPF load balancer list
 
+#### Longhorn Storage (if installed)
+- **Node-level data**:
+  - Data directory listing and sizes (`/var/lib/longhorn`)
+  - Block device information (`lsblk`)
+  - iSCSI sessions and nodes (`iscsiadm`)
+  - Longhorn-related mounts and CSI socket
+  - Kernel SCSI modules (`lsmod`)
+  - Longhorn processes
+- **longhornctl CLI** (if available): version, preflight check
+
 #### Kubernetes
 - Distribution logs, for example rke2 and k3s agent/server journalctl logs
 - Distribution configuration, rke2 and k3s configuration files, static pod manifests
@@ -50,3 +60,9 @@ Note, pod logs from other nodes and additional kubectl output can only be collec
 #### Kubectl output
 - Kubectl list of nodes, pods, services, RBAC roles, persistent volumes, events, ingress and deployments
 - Cluster provisioning CRD objects
+
+#### Longhorn Storage (if installed)
+- **Longhorn CRDs**: volumes, engines, replicas, nodes, settings, engineimages, instancemanagers, sharemanagers, backingimages, backuptargets, backupvolumes, backups, recurringjobs, orphans, snapshots, supportbundles, systembackups, systemrestores
+- **Namespace resources**: deployments, daemonsets, pods, services, events, configmaps, secrets (names only) from `longhorn-system`
+- **Storage resources**: StorageClasses, PersistentVolumes, PersistentVolumeClaims, VolumeAttachments
+- **Pod descriptions**: detailed pod status for troubleshooting

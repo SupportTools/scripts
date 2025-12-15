@@ -57,9 +57,24 @@ The script follows a sequential collection pattern:
 1. `setup()` - Creates temp directory, sets up paths
 2. `disk-space()` - Validates available disk space
 3. `sherlock()` - Auto-detects OS, k8s distribution (rke/rke2/k3s), and init system
-4. `system-all()` - Collects OS-level info (network, disk, processes)
-5. Distribution-specific functions (`rke()`, `rke2()`, `k3s()`, etc.)
-6. `archive()` - Creates tar.gz output in /tmp (or custom directory)
+4. `system-all()` - Collects OS-level info (disk, processes, sysctl)
+5. `networking()` - Comprehensive network data collection (see below)
+6. Distribution-specific functions (`rke()`, `rke2()`, `k3s()`, etc.)
+7. `archive()` - Creates tar.gz output in /tmp (or custom directory)
+
+### Networking Collection (`networking()` function)
+
+The `networking()` function collects comprehensive network diagnostics:
+- **Firewall**: iptables (all tables including raw), ip6tables, nftables, firewalld
+- **IP/Routing**: addresses, routes, rules, neighbors, multicast groups
+- **Sockets**: ss/netstat for TCP, UDP, Unix, raw sockets
+- **Namespaces**: network namespace list
+- **Bridge/VLAN**: bridge links, FDB entries, VLAN config
+- **DNS**: systemd-resolved status and configuration
+- **systemd-networkd**: networkctl status and configs
+- **Interface details**: ethtool for all interfaces (driver, features)
+- **Kernel tunables**: filtered sysctl net.* parameters
+- **CNI-specific**: Calico (calicoctl), Cilium (cilium CLI) when available
 
 ### Supported Kubernetes Distributions
 

@@ -313,6 +313,8 @@ networking() {
   ip6tables --numeric --verbose --list --table mangle > "${TMPDIR}/networking/ip6tablesmangle" 2>&1
   ip6tables --numeric --verbose --list --table nat > "${TMPDIR}/networking/ip6tablesnat" 2>&1
   ip6tables --numeric --verbose --list > "${TMPDIR}/networking/ip6tables" 2>&1
+  iptables --numeric --verbose --list --table raw > "${TMPDIR}/networking/iptablesraw" 2>&1
+  ip6tables --numeric --verbose --list --table raw > "${TMPDIR}/networking/ip6tablesraw" 2>&1
   if command -v nft >/dev/null 2>&1; then
     nft list ruleset  > "${TMPDIR}/networking/nft_ruleset" 2>&1
   fi
@@ -342,6 +344,8 @@ networking() {
     ip -6 rule show > "${TMPDIR}/networking/ipv6rule" 2>&1
     ip -6 route show > "${TMPDIR}/networking/ipv6route" 2>&1
     ip -6 addr show > "${TMPDIR}/networking/ipv6addrshow" 2>&1
+    ip maddr show > "${TMPDIR}/networking/ipmaddr" 2>&1
+    ip -6 maddr show > "${TMPDIR}/networking/ipv6maddr" 2>&1
   fi
   if command -v ifconfig >/dev/null 2>&1; then
     ifconfig -a > "${TMPDIR}/networking/ifconfiga"
@@ -357,6 +361,42 @@ networking() {
     ss -tunlp6 > "${TMPDIR}/networking/sstunlp6" 2>&1
     ss -tunlp4 > "${TMPDIR}/networking/sstunlp4" 2>&1
   fi
+  # Network namespaces
+  if command -v ip >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/namespaces"
+    ip netns list > "${TMPDIR}/networking/namespaces/ip-netns-list" 2>&1
+  fi
+  if [ -d /var/run/netns ]; then
+    mkdir -p "${TMPDIR}/networking/namespaces"
+    ls -la /var/run/netns/ > "${TMPDIR}/networking/namespaces/netns-dir" 2>&1
+  fi
+  # Bridge/VLAN configuration
+  if command -v bridge >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/bridge"
+    bridge link show > "${TMPDIR}/networking/bridge/bridge-link" 2>&1
+    bridge fdb show > "${TMPDIR}/networking/bridge/bridge-fdb" 2>&1
+    bridge vlan show > "${TMPDIR}/networking/bridge/bridge-vlan" 2>&1
+    # Per-interface FDB for CNI overlay interfaces
+    for _interface in flannel.1 vxlan.calico cilium_vxlan cni0 docker0
+    do
+      if ip link show "$_interface" >/dev/null 2>&1; then
+        echo "=== $_interface ===" >> "${TMPDIR}/networking/bridge/bridge-fdb-cni" 2>&1
+        bridge fdb show dev "$_interface" >> "${TMPDIR}/networking/bridge/bridge-fdb-cni" 2>&1
+        echo "" >> "${TMPDIR}/networking/bridge/bridge-fdb-cni" 2>&1
+      fi
+    done
+  fi
+  # Per-interface neighbor cache for CNI overlay interfaces
+  if command -v ip >/dev/null 2>&1; then
+    for _interface in flannel.1 vxlan.calico cilium_vxlan cni0 docker0
+    do
+      if ip link show "$_interface" >/dev/null 2>&1; then
+        echo "=== $_interface ===" >> "${TMPDIR}/networking/ipneighbour-cni" 2>&1
+        ip neigh show dev "$_interface" >> "${TMPDIR}/networking/ipneighbour-cni" 2>&1
+        echo "" >> "${TMPDIR}/networking/ipneighbour-cni" 2>&1
+      fi
+    done
+  fi
   if [ -d /etc/cni/net.d/ ]; then
     mkdir -p "${TMPDIR}/networking/cni"
     find /etc/cni/net.d -type f -not -name '*kubeconfig' -exec cp {} "${TMPDIR}/networking/cni" ';'
@@ -367,6 +407,71 @@ networking() {
         echo "--- $_interface" >> "${TMPDIR}/networking/ethtool" 2>&1
         ethtool -k $_interface >> "${TMPDIR}/networking/ethtool" 2>&1
     done
+  fi
+  # DNS resolution details (systemd-resolved)
+  mkdir -p "${TMPDIR}/networking/dns"
+  if command -v resolvectl >/dev/null 2>&1; then
+    resolvectl status > "${TMPDIR}/networking/dns/resolvectl-status" 2>&1
+    resolvectl statistics > "${TMPDIR}/networking/dns/resolvectl-statistics" 2>&1
+  elif command -v systemd-resolve >/dev/null 2>&1; then
+    systemd-resolve --status > "${TMPDIR}/networking/dns/systemd-resolve-status" 2>&1
+  fi
+  if [ -f /etc/systemd/resolved.conf ]; then
+    cp -p /etc/systemd/resolved.conf "${TMPDIR}/networking/dns/" 2>&1
+  fi
+  if [ -d /etc/systemd/resolved.conf.d ]; then
+    cp -rp /etc/systemd/resolved.conf.d "${TMPDIR}/networking/dns/" 2>&1
+  fi
+  # firewalld detailed rules
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/firewalld"
+    firewall-cmd --state > "${TMPDIR}/networking/firewalld/state" 2>&1
+    firewall-cmd --get-active-zones > "${TMPDIR}/networking/firewalld/active-zones" 2>&1
+    firewall-cmd --list-all-zones > "${TMPDIR}/networking/firewalld/list-all-zones" 2>&1
+  fi
+  # systemd-networkd configuration
+  if command -v networkctl >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/systemd-networkd"
+    networkctl status > "${TMPDIR}/networking/systemd-networkd/networkctl-status" 2>&1
+    networkctl list > "${TMPDIR}/networking/systemd-networkd/networkctl-list" 2>&1
+  fi
+  if [ -d /etc/systemd/network ]; then
+    mkdir -p "${TMPDIR}/networking/systemd-networkd/configs"
+    cp -rp /etc/systemd/network/* "${TMPDIR}/networking/systemd-networkd/configs/" 2>&1
+  fi
+  # Enhanced ethtool for all interfaces
+  if command -v ethtool >/dev/null 2>&1; then
+    for _interface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -v '^lo$' | sed 's/@.*//')
+    do
+      {
+        echo "=== $_interface ==="
+        ethtool "$_interface" 2>&1
+        echo "--- Driver Info ---"
+        ethtool -i "$_interface" 2>&1
+        echo "--- Features ---"
+        ethtool -k "$_interface" 2>&1
+        echo ""
+      } >> "${TMPDIR}/networking/ethtool-all"
+    done
+  fi
+  # Filtered kernel network tunables
+  if command -v sysctl >/dev/null 2>&1; then
+    sysctl -a 2>/dev/null | grep -E '^net\.' > "${TMPDIR}/networking/sysctl-net" 2>&1
+  fi
+  # Calico CLI (if available)
+  if command -v calicoctl >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/cni/calico"
+    calicoctl node status > "${TMPDIR}/networking/cni/calico/node-status" 2>&1
+    calicoctl get nodes -o yaml > "${TMPDIR}/networking/cni/calico/nodes" 2>&1
+    calicoctl get ippool -o yaml > "${TMPDIR}/networking/cni/calico/ippools" 2>&1
+    calicoctl get bgpconfig -o yaml > "${TMPDIR}/networking/cni/calico/bgpconfig" 2>&1
+  fi
+  # Cilium CLI (if available)
+  if command -v cilium >/dev/null 2>&1; then
+    mkdir -p "${TMPDIR}/networking/cni/cilium"
+    cilium status > "${TMPDIR}/networking/cni/cilium/status" 2>&1
+    cilium bpf endpoint list > "${TMPDIR}/networking/cni/cilium/bpf-endpoint-list" 2>&1
+    cilium bpf lb list > "${TMPDIR}/networking/cni/cilium/bpf-lb-list" 2>&1
   fi
 
 }

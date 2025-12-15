@@ -11,9 +11,25 @@ Output that is collected only from the node where the logs collector script is r
 
 #### Operating System
 - General OS configuration, for example: the hostname, resources, process list, service list, packages, limits and tunables
-- Networking, iptables, netstat, interfaces, CNI configuration
 - Journalctl output for related services if available, a list of services is listed in [the `JOURNALD_LOGS` variable](https://github.com/supporttools/scripts/blob/main/logs-collector/rancher2_logs_collector.sh#L12)
 - OS logs from /var/logs, a list of log files is listed in [the `VAR_LOG_FILES` variable](https://github.com/supporttools/scripts/blob/main/logs-collector/rancher2_logs_collector.sh#L15)
+
+#### Networking
+- **Firewall rules**: iptables (filter, nat, mangle, raw tables), ip6tables, nftables ruleset, firewalld zones and rules
+- **IP configuration**: addresses, routes, routing rules, neighbors (ARP/NDP), link statistics (IPv4 and IPv6)
+- **Multicast**: multicast group memberships (`ip maddr`)
+- **Socket statistics**: TCP, UDP, Unix, raw sockets via `ss` and `netstat`
+- **Network namespaces**: list of namespaces, namespace directory contents
+- **Bridge/VLAN**: bridge links, forwarding database (FDB), VLAN configuration
+- **Per-interface data**: FDB and neighbor cache for CNI overlay interfaces (flannel.1, vxlan.calico, cilium_vxlan, cni0, docker0)
+- **DNS resolution**: systemd-resolved status and configuration (`resolvectl`, `/etc/systemd/resolved.conf`)
+- **systemd-networkd**: network controller status and configuration files
+- **Interface details**: ethtool output for all interfaces (general info, driver, features)
+- **Kernel tunables**: filtered `sysctl` output for `net.*` parameters
+- **Load balancing**: IPVS rules and statistics
+- **CNI configuration**: files from `/etc/cni/net.d/`
+- **Calico** (if calicoctl available): node status, nodes, IP pools, BGP configuration
+- **Cilium** (if cilium CLI available): status, BPF endpoint list, BPF load balancer list
 
 #### Kubernetes
 - Distribution logs, for example rke2 and k3s agent/server journalctl logs
